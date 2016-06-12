@@ -1,0 +1,71 @@
+---
+title: "Practical Machine Learning Final Assignment"
+author: "Yann K"
+date: "June 12, 2016"
+output: html_document
+---
+
+##Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+##Data loading and model fitting
+```{r, cache=TRUE, echo=TRUE}
+set.seed(99)
+library(caret)
+library(plyr)
+library(parallel)
+library(doParallel)
+
+teurl<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trurl<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+tedf<-read.csv(teurl)
+trdf<-read.csv(trurl)
+names(tedf)
+#Removing the first columns (X, username, timestamp, window) having non predictive data
+tedf<-tedf[,8:160]
+trdf<-trdf[,8:160]
+
+dim(trdf)
+#Checking for NAs in the training dataset
+count(trdf[is.na(trdf)])
+#Removing NA variables
+trdfna<-trdf[,colSums(is.na(trdf))==0]
+#Removing near zero variance columns
+nz<-nearZeroVar(trdfna, saveMetrics=TRUE)
+trdfna<-trdfna[, !as.logical(nz$nzv)]
+dim(trdfna)
+names(trdfna)
+
+#Create training dataframe subset with only 20% of the data for performance on my laptop 
+it<-createDataPartition(trdfna$classe, p=.2, list=F)
+training<-trdfna[it,]
+testing<-trdfna[-it,]
+
+#Parallel calculation clusters
+cluster<-makeCluster(detectCores()-1)
+registerDoParallel(cluster)
+
+#Random Forest model fitting
+tparam<-trainControl(allowParallel=TRUE, number=5)
+trmodel<-train(classe~., data=training, method="rf", importance=TRUE, trainControl=tparam)
+stopCluster(cluster)
+trmodel
+trmodel$finalModel
+
+#Evaluate training model on the testing dataset
+pred<-predict(trmodel, testing)
+confusionMatrix(pred, testing$classe)
+#Plotting the top 20 most important predictors 
+#The most important predictors are roll_belt, pitch_belt, yaw_belt
+vi<-varImp(trmodel)
+vi[[1]]<-vi[[1]][1:20,]
+plot(vi)
+```
+
+##Applying model to the testing dataset
+```{r, cache=TRUE, echo=TRUE}
+pred<-predict(trmodel, tedf)
+pred
+```
+
+
