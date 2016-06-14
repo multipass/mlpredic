@@ -127,14 +127,21 @@ $(document).ready(function () {
 <h2>Background</h2>
 <p>Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: <a href="http://groupware.les.inf.puc-rio.br/har" class="uri">http://groupware.les.inf.puc-rio.br/har</a> (see the section on the Weight Lifting Exercise Dataset).</p>
 </div>
-<div id="data-loading-and-model-fitting" class="section level2">
-<h2>Data loading and model fitting</h2>
+<div id="data-preparation" class="section level2">
+<h2>Data preparation</h2>
+<ol style="list-style-type: decimal">
+<li>Load the data into dataframes (both training and testing sets)</li>
+<li>Remove the first 7 columns that we will not use as predictor variables: <code>X</code>,<code>user_name</code>, <code>raw_timestamp_part_1</code>, <code>raw_timestamp_part_2</code>, <code>cvtd_timestamp</code>, <code>new_window</code>, <code>num_window</code></li>
+<li>Remove all the columns having their sums=NA, we will not use them as predictor variables</li>
+<li>Remove near zero variances columns using the nearZeroVar from the caret package</li>
+<li>Create a data partition using only 20% of the data for model fitting due to my laptop performance</li>
+</ol>
 <pre class="r"><code>set.seed(99)
 library(caret)
 library(plyr)
 library(parallel)
 library(doParallel)
-
+#1. Download and create dataframes
 teurl&lt;-&quot;https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv&quot;
 trurl&lt;-&quot;https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv&quot;
 tedf&lt;-read.csv(teurl)
@@ -220,19 +227,19 @@ names(tedf)</code></pre>
 ## [155] &quot;accel_forearm_y&quot;          &quot;accel_forearm_z&quot;         
 ## [157] &quot;magnet_forearm_x&quot;         &quot;magnet_forearm_y&quot;        
 ## [159] &quot;magnet_forearm_z&quot;         &quot;problem_id&quot;</code></pre>
-<pre class="r"><code>#Removing the first columns (X, username, timestamp, window) having non predictive data
+<pre class="r"><code>#2. Removing the first columns (X, username, timestamp, window) having non predictive data
 tedf&lt;-tedf[,8:160]
 trdf&lt;-trdf[,8:160]
-
 dim(trdf)</code></pre>
 <pre><code>## [1] 19622   153</code></pre>
 <pre class="r"><code>#Checking for NAs in the training dataset
 count(trdf[is.na(trdf)])</code></pre>
 <pre><code>##      x    freq
 ## 1 &lt;NA&gt; 1287472</code></pre>
-<pre class="r"><code>#Removing NA variables
+<pre class="r"><code>#3. Removing NA variables
 trdfna&lt;-trdf[,colSums(is.na(trdf))==0]
-#Removing near zero variance columns
+
+#4. Removing near zero variance columns
 nz&lt;-nearZeroVar(trdfna, saveMetrics=TRUE)
 trdfna&lt;-trdfna[, !as.logical(nz$nzv)]
 dim(trdfna)</code></pre>
@@ -256,19 +263,27 @@ dim(trdfna)</code></pre>
 ## [46] &quot;gyros_forearm_z&quot;      &quot;accel_forearm_x&quot;      &quot;accel_forearm_y&quot;     
 ## [49] &quot;accel_forearm_z&quot;      &quot;magnet_forearm_x&quot;     &quot;magnet_forearm_y&quot;    
 ## [52] &quot;magnet_forearm_z&quot;     &quot;classe&quot;</code></pre>
-<pre class="r"><code>#Create training dataframe subset with only 20% of the data for performance on my laptop 
+<pre class="r"><code>#5. Create training dataframe subset with only 20% of the data for performance on my laptop 
 it&lt;-createDataPartition(trdfna$classe, p=.2, list=F)
 training&lt;-trdfna[it,]
-testing&lt;-trdfna[-it,]
-
-#Parallel calculation clusters
+testing&lt;-trdfna[-it,]</code></pre>
+</div>
+<div id="model-fitting" class="section level2">
+<h2>Model Fitting</h2>
+<ol style="list-style-type: decimal">
+<li>Setup parallel calculation cluster using all but one core of the laptop</li>
+<li>We will use a random forest using the <code>train</code> function from the <code>caret</code> package with a <code>trainControl</code> parameter using the parallel cluster</li>
+<li>Display the final model result</li>
+</ol>
+<pre class="r"><code>#1. Parallel calculation cluster
 cluster&lt;-makeCluster(detectCores()-1)
 registerDoParallel(cluster)
 
-#Random Forest model fitting
-tparam&lt;-trainControl(allowParallel=TRUE, number=5)
+#2. Random Forest model fitting
+tparam&lt;-trainControl(allowParallel=TRUE)
 trmodel&lt;-train(classe~., data=training, method=&quot;rf&quot;, importance=TRUE, trainControl=tparam)
 stopCluster(cluster)
+#3. Final model
 trmodel</code></pre>
 <pre><code>## Random Forest 
 ## 
@@ -304,8 +319,18 @@ trmodel</code></pre>
 ## C    1  20 658   5   1 0.039416058
 ## D    1   0  19 619   5 0.038819876
 ## E    0   3   8   6 705 0.023545706</code></pre>
-<pre class="r"><code>#Evaluate training model on the testing dataset
+</div>
+<div id="model-evaluation-and-out-of-sample-error-estimation" class="section level2">
+<h2>Model Evaluation and out of sample error estimation</h2>
+<ol style="list-style-type: decimal">
+<li>Use the model to predict the <code>classe</code> of the testing dataset (80% of the data)</li>
+<li>Display the confusion matrix between the predicted values and the actual ones</li>
+<li>Out sample error estimation</li>
+<li>Plotting the top 20 indicators for information</li>
+</ol>
+<pre class="r"><code>#1. Evaluate training model on the testing dataset
 pred&lt;-predict(trmodel, testing)
+#2. Confusion matrix
 confusionMatrix(pred, testing$classe)</code></pre>
 <pre><code>## Confusion Matrix and Statistics
 ## 
@@ -338,7 +363,11 @@ confusionMatrix(pred, testing$classe)</code></pre>
 ## Detection Rate         0.2820   0.1846   0.1673   0.1589   0.1815
 ## Detection Prevalence   0.2886   0.1943   0.1732   0.1616   0.1824
 ## Balanced Accuracy      0.9912   0.9712   0.9761   0.9832   0.9930</code></pre>
-<pre class="r"><code>#Plotting the top 20 most important predictors 
+<pre class="r"><code>#3. Out sample error
+outOfSampleErr&lt;- (1 - (sum(pred==testing$classe)/length(pred)))*100
+print(paste(&quot;Out of sample error is:&quot;, round(outOfSampleErr, digits=4), &quot;%&quot;))</code></pre>
+<pre><code>## [1] &quot;Out of sample error is: 2.5677 %&quot;</code></pre>
+<pre class="r"><code>#4. Plotting the top 20 most important predictors 
 #The most important predictors are roll_belt, pitch_belt, yaw_belt
 vi&lt;-varImp(trmodel)
 vi[[1]]&lt;-vi[[1]][1:20,]

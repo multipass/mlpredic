@@ -8,54 +8,83 @@ output: html_document
 ##Background
 Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
 
-##Data loading and model fitting
+##Data preparation
+1. Load the data into dataframes (both training and testing sets)
+2. Remove the first 7 columns that we will not use as predictor variables: `X`,`user_name`, `raw_timestamp_part_1`, `raw_timestamp_part_2`, `cvtd_timestamp`, `new_window`, `num_window`
+3. Remove all the columns having their sums=NA, we will not use them as predictor variables
+4. Remove near zero variances columns using the nearZeroVar from the caret package
+5. Create a data partition using only 20% of the data for model fitting due to my laptop performance
+
 ```{r, cache=TRUE, echo=TRUE}
 set.seed(99)
 library(caret)
 library(plyr)
 library(parallel)
 library(doParallel)
-
+#1. Download and create dataframes
 teurl<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
 trurl<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
 tedf<-read.csv(teurl)
 trdf<-read.csv(trurl)
 names(tedf)
-#Removing the first columns (X, username, timestamp, window) having non predictive data
+#2. Removing the first columns (X, username, timestamp, window) having non predictive data
 tedf<-tedf[,8:160]
 trdf<-trdf[,8:160]
-
 dim(trdf)
+
 #Checking for NAs in the training dataset
 count(trdf[is.na(trdf)])
-#Removing NA variables
+#3. Removing NA variables
 trdfna<-trdf[,colSums(is.na(trdf))==0]
-#Removing near zero variance columns
+
+#4. Removing near zero variance columns
 nz<-nearZeroVar(trdfna, saveMetrics=TRUE)
 trdfna<-trdfna[, !as.logical(nz$nzv)]
 dim(trdfna)
 names(trdfna)
 
-#Create training dataframe subset with only 20% of the data for performance on my laptop 
+#5. Create training dataframe subset with only 20% of the data for performance on my laptop 
 it<-createDataPartition(trdfna$classe, p=.2, list=F)
 training<-trdfna[it,]
 testing<-trdfna[-it,]
+```
 
-#Parallel calculation clusters
+
+##Model Fitting
+1. Setup parallel calculation cluster using all but one core of the laptop
+2. We will use a random forest using the `train` function from the `caret` package with a `trainControl` parameter using the parallel cluster
+3. Display the final model result
+```{r, cache=TRUE, echo=TRUE}
+#1. Parallel calculation cluster
 cluster<-makeCluster(detectCores()-1)
 registerDoParallel(cluster)
 
-#Random Forest model fitting
-tparam<-trainControl(allowParallel=TRUE, number=5)
+#2. Random Forest model fitting
+tparam<-trainControl(allowParallel=TRUE)
 trmodel<-train(classe~., data=training, method="rf", importance=TRUE, trainControl=tparam)
 stopCluster(cluster)
+#3. Final model
 trmodel
 trmodel$finalModel
+```
 
-#Evaluate training model on the testing dataset
+
+##Model Evaluation and out of sample error estimation
+1. Use the model to predict the `classe` of the testing dataset (80% of the data)
+2. Display the confusion matrix between the predicted values and the actual ones
+3. Out sample error estimation
+4. Plotting the top 20 indicators for information
+
+```{r, cache=TRUE, echo=TRUE}
+#1. Evaluate training model on the testing dataset
 pred<-predict(trmodel, testing)
+#2. Confusion matrix
 confusionMatrix(pred, testing$classe)
-#Plotting the top 20 most important predictors 
+#3. Out sample error
+outOfSampleErr<- (1 - (sum(pred==testing$classe)/length(pred)))*100
+print(paste("Out of sample error is:", round(outOfSampleErr, digits=4), "%"))
+
+#4. Plotting the top 20 most important predictors 
 #The most important predictors are roll_belt, pitch_belt, yaw_belt
 vi<-varImp(trmodel)
 vi[[1]]<-vi[[1]][1:20,]
